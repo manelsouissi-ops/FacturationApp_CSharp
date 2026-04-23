@@ -1,0 +1,22 @@
+@page "/"
+<PageTitle>Accueil - FacturationApp</PageTitle>
+
+<div class="hero">
+    <h1>🧾 Application de Facturation</h1>
+    <p>Système de facturation conforme au modèle tunisien</p>
+    <div class="quick-links">
+        <a href="/clients" class="btn-card">👥 Clients</a>
+        <a href="/produits" class="btn-card">📦 Produits</a>
+        <a href="/factures" class="btn-card">🧾 Factures</a>
+        <a href="/dashboard" class="btn-card">📊 Dashboard</a>
+    </div>
+</div>
+
+<style>
+.hero { text-align:center; padding: 3rem 1rem; }
+.hero h1 { font-size: 2rem; margin-bottom: 0.5rem; }
+.hero p { color: #666; margin-bottom: 2rem; }
+.quick-links { display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; }
+.btn-card { display:inline-block; padding: 1.2rem 2rem; background: #0d6efd; color: white; border-radius: 12px; text-decoration: none; font-size: 1.1rem; transition: transform .2s, box-shadow .2s; }
+.btn-card:hover { transform: translateY(-3px); box-shadow: 0 8px 20px rgba(13,110,253,.3); color: white; }
+</style>

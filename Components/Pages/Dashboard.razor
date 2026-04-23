@@ -1,0 +1,327 @@
+@page "/dashboard"
+@using FacturationApp.Models
+@using FacturationApp.Services
+@inject InvoiceService InvoiceSvc
+@inject IJSRuntime JS
+@inject NavigationManager Navigation
+@rendermode InteractiveServer
+
+<PageTitle>Dashboard</PageTitle>
+<h2>📊 Tableau de Bord</h2>
+
+@if (!loaded)
+{
+    <p>Chargement...</p>
+}
+else if (caTTC == 0 && totalTVA == 0)
+{
+    <div class="empty-state text-center py-5">
+        <h1>📭</h1>
+        <h3>Aucune donnée disponible</h3>
+        <p class="text-muted">Créez votre première facture pour voir les statistiques.</p>
+    </div>
+}
+else
+{
+    <div class="dash-tabs">
+        <button class="tab @(tab == "fiscal" ? "active" : "")" @onclick='() => ChangeTab("fiscal")'>📋 Fiscal</button>
+        <button class="tab @(tab == "ventes" ? "active" : "")" @onclick='() => ChangeTab("ventes")'>💰 Ventes</button>
+    </div>
+
+    @if (tab == "fiscal")
+    {
+        <div class="kpi-row">
+            <div class="kpi-card blue">
+                <div class="kpi-icon"><i class="bi bi-bank"></i>📊</div>
+                <div class="kpi-content">
+                    <div class="kpi-label">TVA Totale Collectée</div>
+                    <div class="kpi-value">@totalTVA.FormatDT()</div>
+                </div>
+            </div>
+            <div class="kpi-card orange">
+                <div class="kpi-icon"><i class="bi bi-receipt"></i>📄</div>
+                <div class="kpi-content">
+                    <div class="kpi-label">Timbre Fiscal Total</div>
+                    <div class="kpi-value">@totalTimbre.FormatDT()</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="section-card">
+            <h5>TVA par Taux</h5>
+            @if (!tvaByRate.Any())
+            {
+                <p class="text-muted">Aucune donnée.</p>
+            }
+            else
+            {
+                <div style="height: 300px; width: 100%;">
+                    <canvas id="tvaChart"></canvas>
+                </div>
+            }
+        </div>
+    }
+
+    @if (tab == "ventes")
+    {
+        <div class="kpi-row">
+            <div class="kpi-card green">
+                <div class="kpi-icon"><i class="bi bi-cash-coin"></i>💰</div>
+                <div class="kpi-content">
+                    <div class="kpi-label">CA Total HT</div>
+                    <div class="kpi-value">@caHT.FormatDT()</div>
+                </div>
+            </div>
+            <div class="kpi-card purple">
+                <div class="kpi-icon"><i class="bi bi-graph-up-arrow"></i>📈</div>
+                <div class="kpi-content">
+                    <div class="kpi-label">CA Total TTC</div>
+                    <div class="kpi-value">@caTTC.FormatDT()</div>
+                    @if (monthlyGrowth.HasValue)
+                    {
+                        <div class="trend-ind @(monthlyGrowth.Value >= 0 ? "trend-up" : "trend-down")">
+                            @(monthlyGrowth.Value >= 0 ? "↑ +" : "↓ ")@monthlyGrowth.Value.ToString("F1")%
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+
+        <div class="top-cards-row">
+            @if (topClient != null)
+            {
+                <div class="top-card">
+                    <div>🏆</div>
+                    <div>
+                        <h5>Top Client</h5>
+                        <strong>@topClient.Value.Name</strong> <span class="amount">(@topClient.Value.Amount.FormatDT())</span>
+                    </div>
+                </div>
+            }
+            @if (topProduct != null)
+            {
+                <div class="top-card" style="border-left-color: #7c3aed;">
+                    <div>🏆</div>
+                    <div>
+                        <h5>Top Produit</h5>
+                        <strong>@topProduct.Value.Name</strong> <span class="amount">(@topProduct.Value.Amount.FormatDT())</span>
+                    </div>
+                </div>
+            }
+        </div>
+
+        <div class="dash-grid">
+            <div class="section-card">
+                <h5>CA par Client</h5>
+                @if (!caByClient.Any())
+                {
+                    <p class="text-muted">Aucune donnée.</p>
+                }
+                else
+                {
+                    var totalClientCA = caByClient.Sum(c => c.TTC);
+                    var maxCA = caByClient.Max(x => x.TTC);
+                    <div class="bar-chart">
+                    @foreach (var c in caByClient.Take(8))
+                    {
+                        var pct = maxCA > 0 ? (double)(c.TTC / maxCA) * 100 : 0;
+                        var share = totalClientCA > 0 ? (c.TTC / totalClientCA) * 100 : 0;
+                        bool isMax = c.TTC == maxCA;
+                        <div class="bar-row">
+                            <span class="bar-label @(isMax ? "fw-bold text-dark" : "text-muted")" title="@c.ClientName">@(c.ClientName.Length > 15 ? c.ClientName[..15] + "…" : c.ClientName)</span>
+                            <div class="bar-track">
+                                <div class="bar-fill @(isMax ? "green" : "neutral")" style="width:@pct.ToString("F0")%" title="@c.ClientName: @c.TTC.FormatDT() (@share.ToString("F0")%)"></div>
+                            </div>
+                            <span class="bar-value @(isMax ? "fw-bold text-dark" : "text-muted")">@c.TTC.FormatDT() (@share.ToString("F0")%)</span>
+                        </div>
+                    }
+                    </div>
+                }
+            </div>
+
+            <div class="section-card">
+                <h5>CA par Produit</h5>
+                @if (!caByProduct.Any())
+                {
+                    <p class="text-muted">Aucune donnée.</p>
+                }
+                else
+                {
+                    var totalProdCA = caByProduct.Sum(p => p.TTC);
+                    var maxP = caByProduct.Max(x => x.TTC);
+                    <div class="bar-chart">
+                    @foreach (var p in caByProduct.Take(8))
+                    {
+                        var pct = maxP > 0 ? (double)(p.TTC / maxP) * 100 : 0;
+                        var share = totalProdCA > 0 ? (p.TTC / totalProdCA) * 100 : 0;
+                        bool isMax = p.TTC == maxP;
+                        <div class="bar-row">
+                            <span class="bar-label @(isMax ? "fw-bold text-dark" : "text-muted")" title="@p.ProductName">@(p.ProductName.Length > 15 ? p.ProductName[..15] + "…" : p.ProductName)</span>
+                            <div class="bar-track">
+                                <div class="bar-fill @(isMax ? "purple" : "neutral")" style="width:@pct.ToString("F0")%" title="@p.ProductName: @p.TTC.FormatDT() (@share.ToString("F0")%)"></div>
+                            </div>
+                            <span class="bar-value @(isMax ? "fw-bold text-dark" : "text-muted")">@p.TTC.FormatDT() (@share.ToString("F0")%)</span>
+                        </div>
+                    }
+                    </div>
+                }
+            </div>
+        </div>
+
+        <div class="dash-grid">
+            <div class="section-card">
+                <h5>CA par Mois</h5>
+                @if (!caByMonth.Any())
+                {
+                    <p class="text-muted">Aucune donnée.</p>
+                }
+                else
+                {
+                    var maxM = caByMonth.Max(x => x.TTC);
+                    <div class="bar-chart">
+                    @foreach (var m in caByMonth)
+                    {
+                        var pct = maxM > 0 ? (double)(m.TTC / maxM) * 100 : 0;
+                        bool isMax = m.TTC == maxM;
+                        <div class="bar-row">
+                            <span class="bar-label @(isMax ? "fw-bold text-dark" : "text-muted")">@m.Period</span>
+                            <div class="bar-track">
+                                <div class="bar-fill @(isMax ? "orange" : "neutral")" style="width:@pct.ToString("F0")%" title="@m.Period: @m.TTC.FormatDT()"></div>
+                            </div>
+                            <span class="bar-value @(isMax ? "fw-bold text-dark" : "text-muted")">@m.TTC.FormatDT()</span>
+                        </div>
+                    }
+                    </div>
+                }
+            </div>
+            
+            <div class="section-card">
+                <h5>Dernières Factures</h5>
+                @if (!lastInvoices.Any())
+                {
+                    <p class="text-muted">Aucune donnée.</p>
+                }
+                else
+                {
+                    <table class="table table-hover table-slim">
+                        <thead>
+                            <tr>
+                                <th>Numéro</th>
+                                <th>Client</th>
+                                <th>Total TTC</th>
+                                <th>Date</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                        @foreach (var inv in lastInvoices)
+                        {
+                            <tr @onclick="() => GoToInvoice(inv.Id)" style="cursor: pointer;">
+                                <td><strong>@(string.IsNullOrEmpty(inv.InvoiceNumber) ? $"#{inv.Id}" : inv.InvoiceNumber)</strong></td>
+                                <td>@inv.Client?.Name</td>
+                                <td>@inv.TotalTTC.FormatDT()</td>
+                                <td>@inv.Date.ToString("dd/MM/yyyy")</td>
+                            </tr>
+                        }
+                        </tbody>
+                    </table>
+                }
+            </div>
+        </div>
+    }
+}
+
+<style>
+.dash-tabs { display:flex; gap:.5rem; margin-bottom:1.5rem; }
+.tab { padding:.6rem 1.5rem; border:2px solid #dee2e6; background:white; border-radius:8px; cursor:pointer; font-weight:600; transition:all .2s; }
+.tab.active { background:#2563eb; color:white; border-color:#2563eb; }
+.kpi-row { display:flex; gap:1.5rem; margin-bottom:2rem; flex-wrap:wrap; }
+.kpi-card { flex:1; min-width:240px; padding:2rem; border-radius:16px; color:white; display:flex; align-items:center; gap:1.5rem; box-shadow:0 4px 6px rgba(0,0,0,0.1); transition:transform 0.2s ease, box-shadow 0.2s ease; overflow:hidden; }
+.kpi-card:hover { transform:translateY(-5px); box-shadow:0 10px 20px rgba(0,0,0,0.15); }
+.kpi-icon { font-size:2.5rem; opacity:0.8; line-height:1; }
+.kpi-icon i { display:none; }
+.kpi-content { display:flex; flex-direction:column; }
+.kpi-card.blue { background:linear-gradient(135deg,#2563eb,#1d4ed8); }
+.kpi-card.orange { background:linear-gradient(135deg,#f59e0b,#d97706); }
+.kpi-card.green { background:linear-gradient(135deg,#10b981,#059669); }
+.kpi-card.purple { background:linear-gradient(135deg,#7c3aed,#6d28d9); }
+.kpi-label { font-size:.85rem; text-transform:uppercase; letter-spacing:0.5px; opacity:.9; margin-bottom:.3rem; }
+.kpi-value { font-size:2.2rem; font-weight:700; line-height:1.2; }
+.trend-ind { font-size:0.9rem; margin-top:0.3rem; padding:0.2rem 0.5rem; border-radius:4px; display:inline-block; font-weight:bold; }
+.trend-up { background:rgba(255,255,255,0.2); }
+.trend-down { background:rgba(255,0,0,0.5); }
+.dash-grid { display:grid; grid-template-columns:1fr 1fr; gap:1.5rem; margin-bottom:1.5rem; }
+@@media(max-width:700px) { .dash-grid { grid-template-columns:1fr; } }
+.section-card { background:white; border:1px solid #dee2e6; border-radius:12px; padding:1.5rem; margin-bottom:1.5rem; box-shadow:0 2px 4px rgba(0,0,0,0.05); }
+.bar-chart { display:flex; flex-direction:column; gap:.8rem; }
+.bar-row { display:flex; align-items:center; gap:.5rem; }
+.bar-label { min-width:140px; font-size:.85rem; }
+.bar-track { flex:1; background:#e9ecef; border-radius:6px; height:24px; overflow:hidden; }
+.bar-fill { height:100%; border-radius:6px; transition:width .4s ease; }
+.bar-fill.blue { background:#2563eb; }
+.bar-fill.green { background:#10b981; }
+.bar-fill.purple { background:#7c3aed; }
+.bar-fill.orange { background:#f59e0b; }
+.bar-fill.neutral { background:#d1d5db; }
+.bar-value { min-width:140px; font-size:.85rem; font-weight:600; text-align:right; }
+.top-cards-row { display:flex; gap:1.5rem; margin-bottom:1.5rem; }
+.top-card { flex:1; background:white; border-left:4px solid #f59e0b; border-radius:8px; padding:1.2rem; box-shadow:0 2px 4px rgba(0,0,0,0.05); display:flex; align-items:center; gap:1rem; }
+.top-card h5 { margin:0; font-size:0.9rem; color:#6c757d; }
+.top-card strong { font-size:1.1rem; color:#212529; }
+.top-card .amount { font-weight:bold; color:#10b981; }
+.table-slim { margin-bottom:0; font-size:0.95rem; }
+.empty-state { background:white; border-radius:12px; padding:3rem; border:1px dashed #dee2e6; }
+</style>
+
+@code {
+    bool loaded = false;
+    string tab = "fiscal";
+
+    void GoToInvoice(int id)
+    {
+        Navigation.NavigateTo($"/factures?id={id}");
+    }
+
+    void ChangeTab(string t)
+    {
+        tab = t;
+    }
+
+    decimal totalTVA, totalTimbre, caHT, caTTC;
+    decimal? monthlyGrowth;
+    (string Name, decimal Amount)? topClient;
+    (string Name, decimal Amount)? topProduct;
+    List<Invoice> lastInvoices = new();
+    List<(decimal Rate, decimal Amount)> tvaByRate = new();
+    List<(string ClientName, decimal HT, decimal TTC)> caByClient = new();
+    List<(string ProductName, decimal HT, decimal TTC)> caByProduct = new();
+    List<(string Period, decimal HT, decimal TTC)> caByMonth = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        totalTVA = await InvoiceSvc.GetTotalTVAAsync();
+        totalTimbre = await InvoiceSvc.GetTotalTimbreAsync();
+        caHT = await InvoiceSvc.GetCAHTAsync();
+        caTTC = await InvoiceSvc.GetCATTCAsync();
+        tvaByRate = await InvoiceSvc.GetTVAByRateAsync();
+        caByClient = await InvoiceSvc.GetCAByClientAsync();
+        caByProduct = await InvoiceSvc.GetCAByProductAsync();
+        caByMonth = await InvoiceSvc.GetCAByMonthAsync();
+        
+        monthlyGrowth = await InvoiceSvc.GetMonthlyGrowthAsync();
+        topClient = await InvoiceSvc.GetTopClientAsync();
+        topProduct = await InvoiceSvc.GetTopProductAsync();
+        lastInvoices = await InvoiceSvc.GetLastInvoicesAsync(5);
+        
+        loaded = true;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (loaded && tab == "fiscal" && tvaByRate.Any())
+        {
+            var labels = tvaByRate.Select(r => $"TVA {r.Rate:0}%").ToArray();
+            var data = tvaByRate.Select(r => r.Amount).ToArray();
+            await JS.InvokeVoidAsync("initTvaDonutChart", "tvaChart", labels, data);
+        }
+    }
+}

@@ -1,0 +1,135 @@
+@page "/clients"
+@using FacturationApp.Models
+@using FacturationApp.Services
+@inject ClientService ClientSvc
+@inject IJSRuntime JS
+@rendermode InteractiveServer
+
+<PageTitle>Clients</PageTitle>
+<h2>👥 Gestion des Clients</h2>
+
+<div class="toolbar">
+    <input class="form-control search-box" placeholder="🔍 Rechercher..." @bind="search" @bind:event="oninput" @onkeyup="LoadData" />
+    <button class="btn btn-primary" @onclick="() => OpenForm(null)">+ Ajouter</button>
+</div>
+
+@if (!string.IsNullOrEmpty(errorMessage))
+{
+    <div class="alert alert-danger mt-2">@errorMessage</div>
+}
+
+@if (showForm)
+{
+    <div class="modal-overlay" @onclick="CloseForm">
+        <div class="modal-box" @onclick:stopPropagation="true">
+            <h4>@(editClient.Id == 0 ? "Nouveau Client" : "Modifier Client")</h4>
+            <EditForm Model="editClient" OnValidSubmit="SaveClient">
+                <DataAnnotationsValidator />
+                <ValidationSummary />
+                <div class="mb-3">
+                    <label class="form-label">Nom *</label>
+                    <InputText class="form-control" @bind-Value="editClient.Name" />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Téléphone</label>
+                    <InputText class="form-control" @bind-Value="editClient.Phone" />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Adresse</label>
+                    <InputText class="form-control" @bind-Value="editClient.Address" />
+                </div>
+                <div class="d-flex gap-2 justify-content-end">
+                    <button type="button" class="btn btn-secondary" @onclick="CloseForm">Annuler</button>
+                    <button type="submit" class="btn btn-primary">Enregistrer</button>
+                </div>
+            </EditForm>
+        </div>
+    </div>
+}
+
+@if (clients == null)
+{
+    <p>Chargement...</p>
+}
+else if (!clients.Any())
+{
+    <p class="text-muted">Aucun client trouvé.</p>
+}
+else
+{
+    <table class="table table-hover mt-3">
+        <thead class="table-dark">
+            <tr><th>ID</th><th>Nom</th><th>Téléphone</th><th>Adresse</th><th>Actions</th></tr>
+        </thead>
+        <tbody>
+        @foreach (var c in clients)
+        {
+            <tr>
+                <td>#@c.Id</td>
+                <td><strong>@c.Name</strong></td>
+                <td>@c.Phone</td>
+                <td>@c.Address</td>
+                <td>
+                    <button class="btn btn-sm btn-outline-primary" @onclick="() => OpenForm(c)">✏️</button>
+                    <button class="btn btn-sm btn-outline-danger" @onclick="() => Delete(c.Id)">🗑️</button>
+                </td>
+            </tr>
+        }
+        </tbody>
+    </table>
+}
+
+<style>
+.toolbar { display:flex; gap:.5rem; margin-bottom:1rem; align-items:center; }
+.search-box { max-width:300px; }
+.modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,.5); display:flex; align-items:center; justify-content:center; z-index:1000; }
+.modal-box { background:white; border-radius:12px; padding:2rem; min-width:400px; max-width:95vw; }
+</style>
+
+@code {
+    List<Client>? clients;
+    bool showForm = false;
+    string search = "";
+    string? errorMessage = null;
+    Client editClient = new();
+
+    protected override async Task OnInitializedAsync() => await LoadData();
+
+    async Task LoadData()
+    {
+        clients = await ClientSvc.GetAllAsync(search);
+    }
+
+    void OpenForm(Client? c)
+    {
+        editClient = c == null ? new Client() : new Client { Id = c.Id, Name = c.Name, Phone = c.Phone, Address = c.Address };
+        showForm = true;
+    }
+
+    void CloseForm() => showForm = false;
+
+    async Task SaveClient()
+    {
+        if (editClient.Id == 0)
+            await ClientSvc.AddAsync(editClient);
+        else
+            await ClientSvc.UpdateAsync(editClient);
+        showForm = false;
+        await LoadData();
+    }
+
+    async Task Delete(int id)
+    {
+        bool confirmed = await JS.InvokeAsync<bool>("confirm", "Êtes-vous sûr de vouloir supprimer ce client ?");
+        if (!confirmed) return;
+
+        errorMessage = null;
+        var result = await ClientSvc.DeleteAsync(id);
+        if (result != null)
+        {
+            errorMessage = result;
+            return;
+        }
+        await LoadData();
+    }
+}

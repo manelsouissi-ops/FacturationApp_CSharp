@@ -1,0 +1,251 @@
+@page "/factures"
+@using FacturationApp.Models
+@using FacturationApp.Services
+@inject InvoiceService InvoiceSvc
+@inject ClientService ClientSvc
+@inject ProductService ProductSvc
+@rendermode InteractiveServer
+
+<PageTitle>Factures</PageTitle>
+<h2>🧾 Gestion des Factures</h2>
+
+<div class="toolbar">
+    <input class="form-control search-box" placeholder="🔍 Rechercher..." @bind="search" @bind:event="oninput" @onkeyup="LoadData" />
+    <input type="date" class="form-control date-box" @bind="filterFrom" />
+    <input type="date" class="form-control date-box" @bind="filterTo" />
+    <button class="btn btn-primary" @onclick="OpenNewForm">+ Nouvelle Facture</button>
+</div>
+
+@if (showForm)
+{
+    <div class="modal-overlay" @onclick="CloseForm">
+        <div class="modal-box wide" @onclick:stopPropagation="true">
+            <h4>Nouvelle Facture</h4>
+
+            <div class="mb-3">
+                <label class="form-label">Client *</label>
+                <select class="form-select" @bind="newClientId">
+                    <option value="0">-- Choisir un client --</option>
+                    @foreach (var c in allClients)
+                    {
+                        <option value="@c.Id">@c.Name</option>
+                    }
+                </select>
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label">Timbre Fiscal (DT)</label>
+                <input type="number" class="form-control" step="0.001" @bind="timbreFiscal" />
+            </div>
+
+            <h5>Lignes de facture</h5>
+            @foreach (var line in newLines)
+            {
+                var prod = allProducts.FirstOrDefault(p => p.Id == line.ProductId);
+                <div class="line-row">
+                    <select class="form-select" @bind="line.ProductId" @bind:after="() => RecalcLine(line)">
+                        <option value="0">-- Produit --</option>
+                        @foreach (var p in allProducts)
+                        {
+                            <option value="@p.Id">@p.Name (@p.PriceHT.FormatDT(), @p.TvaRate.ToString("0")%)</option>
+                        }
+                    </select>
+                    <input type="number" class="form-control qty" min="1" @bind="line.Quantity" @bind:after="() => RecalcLine(line)" />
+                    <span class="line-total">@line.TotalTTC.FormatDT() TTC</span>
+                    <button class="btn btn-sm btn-outline-danger" @onclick="() => newLines.Remove(line)">✕</button>
+                </div>
+            }
+            <button class="btn btn-outline-secondary btn-sm mt-2" @onclick="AddLine">+ Ajouter une ligne</button>
+
+            <div class="totals-box mt-3">
+                <span>HT: <strong>@newLines.Sum(l => l.TotalHT).FormatDT()</strong></span>
+                <span>TVA: <strong>@newLines.Sum(l => l.TotalTVA).FormatDT()</strong></span>
+                <span>Timbre: <strong>@timbreFiscal.FormatDT()</strong></span>
+                <span>TTC: <strong class="text-primary">@(newLines.Sum(l => l.TotalTTC) + timbreFiscal).FormatDT()</strong></span>
+            </div>
+
+            <div class="d-flex gap-2 justify-content-end mt-3">
+                <button type="button" class="btn btn-secondary" @onclick="CloseForm">Annuler</button>
+                <button type="button" class="btn btn-primary" @onclick="SaveInvoice">💾 Enregistrer</button>
+            </div>
+        </div>
+    </div>
+}
+
+@if (viewInvoice != null)
+{
+    <div class="modal-overlay" @onclick="() => viewInvoice = null">
+        <div class="modal-box wide print-area" @onclick:stopPropagation="true">
+            <div class="invoice-header">
+                <div>
+                    <h3>FACTURE @(string.IsNullOrEmpty(viewInvoice.InvoiceNumber) ? $"#{viewInvoice.Id}" : viewInvoice.InvoiceNumber)</h3>
+                    <p>Date: @viewInvoice.Date.ToString("dd/MM/yyyy")</p>
+                </div>
+                <div class="text-end">
+                    <strong>Client: @viewInvoice.Client?.Name</strong><br />
+                    @viewInvoice.Client?.Address
+                </div>
+            </div>
+            <table class="table table-bordered mt-3">
+                <thead class="table-dark">
+                    <tr><th>Produit</th><th>Qté</th><th>Prix HT</th><th>TVA%</th><th>Total HT</th><th>Total TVA</th><th>Total TTC</th></tr>
+                </thead>
+                <tbody>
+                @foreach (var l in viewInvoice.Lines)
+                {
+                    <tr>
+                        <td>@l.Product?.Name</td>
+                        <td>@l.Quantity</td>
+                        <td>@l.UnitPriceHT.FormatDT()</td>
+                        <td>@l.TvaRate.ToString("0")%</td>
+                        <td>@l.TotalHT.FormatDT()</td>
+                        <td>@l.TotalTVA.FormatDT()</td>
+                        <td>@l.TotalTTC.FormatDT()</td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+            <div class="totals-summary">
+                <div>Total HT: <strong>@viewInvoice.TotalHT.FormatDT()</strong></div>
+                <div>Total TVA: <strong>@viewInvoice.TotalTVA.FormatDT()</strong></div>
+                <div>Timbre Fiscal: <strong>@viewInvoice.TimbreFiscal.FormatDT()</strong></div>
+                <div class="total-ttc">Total TTC: <strong>@viewInvoice.TotalTTC.FormatDT()</strong></div>
+            </div>
+            <div class="d-flex gap-2 justify-content-end mt-3">
+                <button class="btn btn-outline-secondary" @onclick="() => viewInvoice = null">Fermer</button>
+                <button class="btn btn-outline-primary" onclick="window.print()">🖨️ Imprimer</button>
+            </div>
+        </div>
+    </div>
+}
+
+@if (invoices == null)
+{
+    <p>Chargement...</p>
+}
+else if (!invoices.Any())
+{
+    <p class="text-muted">Aucune facture trouvée.</p>
+}
+else
+{
+    <table class="table table-hover mt-3">
+        <thead class="table-dark">
+            <tr><th>Numéro</th><th>Date</th><th>Client</th><th>Total HT</th><th>TVA</th><th>Timbre</th><th>Total TTC</th><th>Actions</th></tr>
+        </thead>
+        <tbody>
+        @foreach (var inv in invoices)
+        {
+            <tr>
+                <td><strong>@(string.IsNullOrEmpty(inv.InvoiceNumber) ? $"#{inv.Id}" : inv.InvoiceNumber)</strong></td>
+                <td>@inv.Date.ToString("dd/MM/yyyy")</td>
+                <td>@inv.Client?.Name</td>
+                <td>@inv.TotalHT.FormatDT()</td>
+                <td>@inv.TotalTVA.FormatDT()</td>
+                <td>@inv.TimbreFiscal.FormatDT()</td>
+                <td><strong>@inv.TotalTTC.FormatDT()</strong></td>
+                <td>
+                    <button class="btn btn-sm btn-outline-info" @onclick="() => ViewInvoice(inv.Id)">👁️</button>
+                    <button class="btn btn-sm btn-outline-danger" @onclick="() => Delete(inv.Id)">🗑️</button>
+                </td>
+            </tr>
+        }
+        </tbody>
+    </table>
+}
+
+<style>
+.toolbar { display:flex; gap:.5rem; margin-bottom:1rem; align-items:center; flex-wrap:wrap; }
+.search-box { max-width:200px; }
+.date-box { max-width:150px; }
+.modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,.5); display:flex; align-items:center; justify-content:center; z-index:1000; overflow-y:auto; padding:1rem; }
+.modal-box { background:white; border-radius:12px; padding:2rem; min-width:400px; max-width:95vw; }
+.wide { min-width:min(750px, 95vw); }
+.line-row { display:flex; gap:.5rem; align-items:center; margin-bottom:.5rem; }
+.qty { max-width:80px; }
+.line-total { white-space:nowrap; min-width:130px; text-align:right; }
+.totals-box { display:flex; gap:1.5rem; background:#f8f9fa; padding:1rem; border-radius:8px; flex-wrap:wrap; }
+.totals-summary { background:#f8f9fa; padding:1rem; border-radius:8px; }
+.totals-summary div { margin:.2rem 0; }
+.total-ttc { font-size:1.2rem; color:#0d6efd; margin-top:.5rem; }
+.invoice-header { display:flex; justify-content:space-between; align-items:flex-start; }
+@@media print { .modal-overlay { position:static; background:none; } .modal-box { box-shadow:none; border:none; } }
+</style>
+
+@code {
+    List<Invoice>? invoices;
+    List<Client> allClients = new();
+    List<Product> allProducts = new();
+    bool showForm = false;
+    string search = "";
+    DateTime? filterFrom, filterTo;
+
+    int newClientId = 0;
+    decimal timbreFiscal = FiscalSettings.TIMBRE_FISCAL;
+    List<LineViewModel> newLines = new();
+    Invoice? viewInvoice;
+
+    class LineViewModel
+    {
+        public int ProductId { get; set; }
+        public int Quantity { get; set; } = 1;
+        public decimal UnitPriceHT { get; set; }
+        public decimal TvaRate { get; set; }
+        public decimal TotalHT { get; set; }
+        public decimal TotalTVA { get; set; }
+        public decimal TotalTTC { get; set; }
+    }
+
+    protected override async Task OnInitializedAsync() => await LoadData();
+
+    async Task LoadData()
+    {
+        invoices = await InvoiceSvc.GetAllAsync(search, filterFrom, filterTo);
+        allClients = await ClientSvc.GetAllAsync();
+        allProducts = await ProductSvc.GetAllAsync();
+    }
+
+    void OpenNewForm()
+    {
+        newClientId = 0;
+        timbreFiscal = FiscalSettings.TIMBRE_FISCAL;
+        newLines = new List<LineViewModel>();
+        AddLine();
+        showForm = true;
+    }
+
+    void CloseForm() => showForm = false;
+
+    void AddLine() => newLines.Add(new LineViewModel());
+
+    void RecalcLine(LineViewModel line)
+    {
+        var prod = allProducts.FirstOrDefault(p => p.Id == line.ProductId);
+        if (prod == null) return;
+        line.UnitPriceHT = prod.PriceHT;
+        line.TvaRate = prod.TvaRate;
+        line.TotalHT = prod.PriceHT * line.Quantity;
+        line.TotalTVA = line.TotalHT * prod.TvaRate / 100;
+        line.TotalTTC = line.TotalHT + line.TotalTVA;
+    }
+
+    async Task SaveInvoice()
+    {
+        if (newClientId == 0 || !newLines.Any(l => l.ProductId > 0)) return;
+        var items = newLines.Where(l => l.ProductId > 0).Select(l => (l.ProductId, l.Quantity)).ToList();
+        await InvoiceSvc.CreateAsync(newClientId, items, timbreFiscal);
+        showForm = false;
+        await LoadData();
+    }
+
+    async Task ViewInvoice(int id)
+    {
+        viewInvoice = await InvoiceSvc.GetByIdAsync(id);
+    }
+
+    async Task Delete(int id)
+    {
+        await InvoiceSvc.DeleteAsync(id);
+        await LoadData();
+    }
+}

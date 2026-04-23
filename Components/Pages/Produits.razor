@@ -1,0 +1,153 @@
+@page "/produits"
+@using FacturationApp.Models
+@using FacturationApp.Services
+@inject ProductService ProductSvc
+@inject IJSRuntime JS
+@rendermode InteractiveServer
+
+<PageTitle>Produits</PageTitle>
+<h2>📦 Gestion des Produits</h2>
+
+<div class="toolbar">
+    <input class="form-control search-box" placeholder="🔍 Rechercher..." @bind="search" @bind:event="oninput" @onkeyup="LoadData" />
+    <button class="btn btn-primary" @onclick="() => OpenForm(null)">+ Ajouter</button>
+</div>
+
+@if (!string.IsNullOrEmpty(errorMessage))
+{
+    <div class="alert alert-danger mt-2">@errorMessage</div>
+}
+
+@if (showForm)
+{
+    <div class="modal-overlay" @onclick="CloseForm">
+        <div class="modal-box" @onclick:stopPropagation="true">
+            <h4>@(editProduct.Id == 0 ? "Nouveau Produit" : "Modifier Produit")</h4>
+            <EditForm Model="editProduct" OnValidSubmit="SaveProduct">
+                <DataAnnotationsValidator />
+                <ValidationSummary />
+                <div class="mb-3">
+                    <label class="form-label">Nom *</label>
+                    <InputText class="form-control" @bind-Value="editProduct.Name" />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Prix HT (DT) *</label>
+                    <InputNumber class="form-control" @bind-Value="editProduct.PriceHT" />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Taux TVA (%) *</label>
+                    <InputSelect class="form-select" @bind-Value="editProduct.TvaRate" TValue="decimal">
+                        <option value="0">0%</option>
+                        <option value="7">7%</option>
+                        <option value="13">13%</option>
+                        <option value="19">19%</option>
+                    </InputSelect>
+                </div>
+                <div class="d-flex gap-2 justify-content-end">
+                    <button type="button" class="btn btn-secondary" @onclick="CloseForm">Annuler</button>
+                    <button type="submit" class="btn btn-primary">Enregistrer</button>
+                </div>
+            </EditForm>
+        </div>
+    </div>
+}
+
+@if (products == null)
+{
+    <p>Chargement...</p>
+}
+else if (!products.Any())
+{
+    <p class="text-muted">Aucun produit trouvé.</p>
+}
+else
+{
+    <table class="table table-hover mt-3">
+        <thead class="table-dark">
+            <tr><th>ID</th><th>Nom</th><th>Prix HT</th><th>TVA</th><th>Prix TTC</th><th>Actions</th></tr>
+        </thead>
+        <tbody>
+        @foreach (var p in products)
+        {
+            var ttc = p.PriceHT * (1 + p.TvaRate / 100);
+            <tr>
+                <td>#@p.Id</td>
+                <td><strong>@p.Name</strong></td>
+                <td>@p.PriceHT.FormatDT()</td>
+                <td><span class="badge bg-info text-dark">@p.TvaRate.ToString("0")%</span></td>
+                <td><strong>@ttc.FormatDT()</strong></td>
+                <td>
+                    <button class="btn btn-sm btn-outline-primary" @onclick="() => OpenForm(p)">✏️</button>
+                    <button class="btn btn-sm btn-outline-danger" @onclick="() => Delete(p.Id)">🗑️</button>
+                </td>
+            </tr>
+        }
+        </tbody>
+    </table>
+}
+
+<style>
+.toolbar { display:flex; gap:.5rem; margin-bottom:1rem; align-items:center; }
+.search-box { max-width:300px; }
+.modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,.5); display:flex; align-items:center; justify-content:center; z-index:1000; }
+.modal-box { background:white; border-radius:12px; padding:2rem; min-width:400px; max-width:95vw; }
+</style>
+
+@code {
+    List<Product>? products;
+    bool showForm = false;
+    string search = "";
+    string? errorMessage = null;
+    Product editProduct = new();
+
+    protected override async Task OnInitializedAsync() => await LoadData();
+
+    async Task LoadData()
+    {
+        products = await ProductSvc.GetAllAsync(search);
+    }
+
+    void OpenForm(Product? p)
+    {
+        editProduct = p == null ? new Product() : new Product { Id = p.Id, Name = p.Name, PriceHT = p.PriceHT, TvaRate = p.TvaRate };
+        showForm = true;
+    }
+
+    void CloseForm() => showForm = false;
+
+    async Task SaveProduct()
+    {
+        try
+        {
+            errorMessage = null;
+            if (editProduct.Id == 0)
+                await ProductSvc.AddAsync(editProduct);
+            else
+                await ProductSvc.UpdateAsync(editProduct);
+
+            showForm = false;
+            await LoadData();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Erreur lors de l'enregistrement : {ex.Message}";
+        }
+    }
+
+    async Task Delete(int id)
+    {
+        bool confirmed = await JS.InvokeAsync<bool>("confirm", "Êtes-vous sûr de vouloir supprimer ce produit ?");
+        if (!confirmed) return;
+
+        errorMessage = null;
+        try
+        {
+            await ProductSvc.DeleteAsync(id);
+            await LoadData();
+        }
+        catch (InvalidOperationException ex)
+        {
+            errorMessage = ex.Message;
+        }
+    }
+}
